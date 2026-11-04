@@ -38,10 +38,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class StartupLoggingTest {
 
     private static final String JAAS_KEY = "camel.idempotency.kafka.sasl.jaas.config";
+    private static final String USERNAME = "startup-log-regression-user";
     private static final String PASSWORD = "startup-log-regression-password";
     private static final String JAAS = "org.apache.kafka.common.security.scram.ScramLoginModule required "
-        + "username=\"dev\" password=\"" + PASSWORD + "\";";
+        + "username=\"" + USERNAME + "\" password=\"" + PASSWORD + "\";";
     private static final String CUSTOM_VALUE = "startup-log-regression-custom-value";
+    private static final String SECRET_KEY = "camel.component.aws2-kinesis.secretKey";
+    private static final String SECRET_VALUE = "startup-log-regression-secret-key";
 
     private final Queue<String> messages = new ConcurrentLinkedQueue<>();
     private final AbstractAppender appender = new AbstractAppender(
@@ -77,15 +80,24 @@ public class StartupLoggingTest {
     }
 
     @Test
-    public void testMainDoesNotLogPropertyValues() throws Exception {
+    public void testMainMasksCredentialsAndLogsOtherPropertyValues() throws Exception {
         Map<String, String> props = properties();
+        props.put("sasl.jaas.config", JAAS);
+        props.put("producer.override.sasl.jaas.config", JAAS);
+        props.put("consumer.override.sasl.jaas.config", JAAS);
+        props.put(SECRET_KEY, SECRET_VALUE);
         DefaultCamelContext context = new DefaultCamelContext();
         CamelKafkaConnectMain main = CamelKafkaConnectMain.builder("direct:start", "direct:end")
             .withProperties(props)
             .build(context);
         try {
             assertThat(main.getInitialProperties()).containsAllEntriesOf(props);
-            assertSafeLogs();
+            assertThat(String.join("\n", messages))
+                .contains("Setting initial properties in Camel context:", "custom.setting=" + CUSTOM_VALUE,
+                    JAAS_KEY + "=xxxxxxx", "sasl.jaas.config=xxxxxxx",
+                    "producer.override.sasl.jaas.config=xxxxxxx", "consumer.override.sasl.jaas.config=xxxxxxx",
+                    SECRET_KEY + "=xxxxxxx")
+                .doesNotContain(JAAS, USERNAME, PASSWORD, "ScramLoginModule", SECRET_VALUE);
         } finally {
             main.stop();
             context.stop();
@@ -106,7 +118,6 @@ public class StartupLoggingTest {
     private Map<String, String> properties() {
         Map<String, String> props = new HashMap<>();
         props.put(JAAS_KEY, JAAS);
-        // Secret values can occur under names that a sensitive-key heuristic cannot recognize.
         props.put("custom.setting", CUSTOM_VALUE);
         return props;
     }
@@ -114,6 +125,6 @@ public class StartupLoggingTest {
     private void assertSafeLogs() {
         assertThat(String.join("\n", messages))
             .contains(JAAS_KEY, "custom.setting")
-            .doesNotContain(JAAS, PASSWORD, CUSTOM_VALUE);
+            .doesNotContain(JAAS, USERNAME, PASSWORD, CUSTOM_VALUE);
     }
 }
