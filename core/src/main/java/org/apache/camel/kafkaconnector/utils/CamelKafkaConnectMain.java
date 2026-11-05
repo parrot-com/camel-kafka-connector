@@ -207,11 +207,13 @@ public class CamelKafkaConnectMain extends SimpleMain {
         }
 
         private String filterSensitive(Map.Entry<Object, Object> entry) {
-
-            if (SensitiveUtils.containsSensitive((String) entry.getKey())) {
-                return entry.getKey() + "=xxxxxxx";
+            String key = (String) entry.getKey();
+            // Camel's sensitive-option matcher does not recognize dotted Kafka JAAS keys.
+            if (SensitiveUtils.containsSensitive(key)
+                || key.equals("sasl.jaas.config") || key.endsWith(".sasl.jaas.config")) {
+                return key + "=xxxxxxx";
             }
-            return entry.getKey() + "=" + entry.getValue();
+            return key + "=" + entry.getValue();
         }
 
 
